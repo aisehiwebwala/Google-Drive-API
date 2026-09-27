@@ -68,4 +68,4 @@ async function uploadUrlToDrive(url, parentFolderId) {
     }
 }
 
-uploadUrlToDrive("https://www.w3schools.com/Html/mov_bbb.mp4", process.env.parentFolderId)
+uploadUrlToDrive("https://s4.tkvids.com/remote_control.php?file=-jMiuIWErsPqL3YCyuCnEiERlxUJjJpoS6DcTk264YGfAhtuhPAG6Rwh0H5MITpjskkjp3QMvCP2zOJFHl1utk8xdVDb2xpmPkYCQhrD5Lk_dSzAxyo08Orv1hDDCj3SZF5sjQ6U36CxNHQGiTyMGgyXuKJWzo25wIkE8xosxcQojyz2wt_aMTGinJkrwvILD1FOf0bRQB_K_rNmoz1GWsYv5WQ.mp4&acctoken=M2U3NmJkNmQ3YzA5NzJmMTY3MmRhZDEwOWVkYTFhMTcxYmVjNTZlNzMzYjY2MjNjNmRjNjc2NDRmM2E1MzZlZXwxNzkwNTQ2MzUxfDB8dHJhaGtpbm8ubWV8MHx8YjY2NDc5YjMxZTVmNzRhMGFhMGIxZjJiYmMyOWYxMzA", process.env.parentFolderId)
