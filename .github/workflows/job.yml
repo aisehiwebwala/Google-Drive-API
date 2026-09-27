@@ -1,0 +1,29 @@
+name: Download File from URL and Upload To Drive
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run Node App
+        env:
+          client_id: ${{ secrets.CLIENT_ID }}
+          client_secret: ${{ secrets.CLIENT_SECRET }}
+          refresh_token: ${{ secrets.REFRESH_TOKEN }}
+          parentFolderId: ${{ secrets.PARENTFOLDERID }}
+        run: node FileUploader.js
