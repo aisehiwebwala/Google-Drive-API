@@ -34,7 +34,7 @@ async function uploadUrlToDrive(url, parentFolderId) {
         console.log(`Starting download for: ${fileName} (${fileInfo.contentType})`);
 
         // 3. Initiate the actual file download
-        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me" } });
+        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me","User-Agent":"PostmanRuntime/7.51.1" } });
         if (!fetchResponse.ok) {
             throw new Error(`Failed to download file: ${fetchResponse.status}`);
         }
