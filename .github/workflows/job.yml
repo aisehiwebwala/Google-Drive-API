@@ -20,6 +20,10 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      # Connects the runner to Cloudflare WARP to change its IP
+      - name: Setup WARP
+        uses: fscarmen/warp-on-actions@v1.1
+        
       - name: Run Node App
         env:
           client_id: ${{ secrets.CLIENT_ID }}
