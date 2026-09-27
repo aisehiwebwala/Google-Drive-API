@@ -36,7 +36,7 @@ async function uploadUrlToDrive(url, parentFolderId) {
         // 3. Initiate the actual file download
         const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me" } });
         if (!fetchResponse.ok) {
-            throw new Error(`Failed to download file: ${fetchResponse.statusText}`);
+            throw new Error(`Failed to download file: ${fetchResponse.status}`);
         }
 
         // 4. Convert Web Stream to Node.js Stream
