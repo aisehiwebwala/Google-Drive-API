@@ -5,6 +5,8 @@ const { spawn } = require('child_process');
 const dotenv = require("dotenv")
 dotenv.config()
 
+const firebase_utils = require("./firebase/utils")
+
 const authClient = new google.auth.OAuth2({
     client_id: process.env.client_id,
     client_secret: process.env.client_secret
@@ -15,10 +17,11 @@ authClient.setCredentials({
 })
 
 const drive = google.drive({ version: 'v3', auth: authClient });
+const parentFolderId = process.env.parentFolderId
 
-async function getFileInfo(_url) {
+async function getFileInfo(_url, customHeaders) {
     try {
-        const response = await fetch(_url, { method: "HEAD", headers: { "Referer": "https://mzfi.me" } })
+        const response = await fetch(_url, { method: "HEAD", headers: { "Referer": "https://mzfi.me", ...customHeaders } })
         if (response.status === 426) {
             const requiredProtocol = response.headers.get("upgrade");
             console.error(`\n[BLOCKED] 426 Upgrade Required.`);
@@ -31,17 +34,17 @@ async function getFileInfo(_url) {
     }
 }
 
-async function uploadUrlToDrive(url, parentFolderId) {
+async function uploadUrlToDrive(url, customHeaders) {
     try {
         // 1. Get the file info using your utility function
-        const fileInfo = await getFileInfo(url);
+        const fileInfo = await getFileInfo(url,customHeaders);
         if (!fileInfo) throw new Error("Could not retrieve file information.");
 
         const fileName = Date().toString() + " --- URL_FILE"
         console.log(`Starting download for: ${fileName} (${fileInfo.contentType})`);
 
         // 3. Initiate the actual file download
-        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1" } });
+        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
         if (response.status === 426) {
             const requiredProtocol = response.headers.get("upgrade");
             console.error(`\n[BLOCKED] 426 Upgrade Required.`);
@@ -79,7 +82,7 @@ async function uploadUrlToDrive(url, parentFolderId) {
     }
 }
 
-async function uploadUrlToDriveDirect(url, parentFolderId) {
+async function uploadUrlToDriveDirect(url) {
     try {
         // 1. Get file info for the mimeType
         const fileInfo = await getFileInfo(url);
@@ -128,4 +131,55 @@ async function uploadUrlToDriveDirect(url, parentFolderId) {
     }
 }
 
-uploadUrlToDriveDirect("https://bcdnxw.hakunaymatata.com/tran-audio/20250605/796498e9ee9aadffff980262ecae9207.mp4?sign=c510688f75028d52ce465a8a5b801a05&t=1790540421", process.env.parentFolderId)
+const runJobLinkWise = async({ url, id, customHeaders }) => {
+    try {
+        console.log({ url, id, customHeaders })
+
+        firebase_utils.updateLink(id,{"status":"Started"})
+
+        // 1. Get the file info using your utility function
+        const fileInfo = await getFileInfo(url,customHeaders);
+        if (!fileInfo) throw new Error("Could not retrieve file information.");
+
+        const fileName = Date().toString() + " --- URL_FILE"
+        firebase_utils.updateLink(id,{"status":"Starting download"})
+
+        // 3. Initiate the actual file download
+        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
+        
+        if (!fetchResponse.ok) {
+            throw new Error(`Failed to download file: ${fetchResponse.status}`);
+        }
+
+        // 4. Convert Web Stream to Node.js Stream
+        const nodeStream = Readable.fromWeb(fetchResponse.body);
+        firebase_utils.updateLink(id,{"status":"Uploading to Drive..."})
+
+        // 5. Pipe to Google Drive
+        const driveResponse = await drive.files.create({
+            requestBody: {
+                name: fileName,
+                parents: [parentFolderId]
+            },
+            media: {
+                mimeType: fileInfo.contentType,
+                body: nodeStream,
+            },
+            fields: 'id, name, webViewLink',
+        });
+
+        firebase_utils.updateLink(id,{"status":"Upload Complete","completed":true})
+
+    } catch (error) {
+        firebase_utils.updateLink(id, { "completed": false, "status": error.message })
+    }
+}
+
+const run_job = async () => {
+    const allPendingLinks = await firebase_utils.listPending()
+    for (const links of allPendingLinks) {
+        runJobLinkWise(links)
+    }
+}
+
+// run_job()
