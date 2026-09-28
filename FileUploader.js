@@ -139,7 +139,7 @@ const runJobLinkWise = async({ data, id, customHeaders }) => {
         const fileInfo = await getFileInfo(data.url,customHeaders);
         if (!fileInfo) throw new Error("Could not retrieve file information.");
 
-        const fileName = data?.filename | Date().toString() + " --- URL_FILE"
+        const fileName = data.filename || (Date().toString() + " --- URL_FILE")
         firebase_utils.updateLink(id,{"status":"Starting download"})
 
         // 3. Initiate the actual file download
