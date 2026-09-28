@@ -131,21 +131,19 @@ async function uploadUrlToDriveDirect(url) {
     }
 }
 
-const runJobLinkWise = async({ url, id, customHeaders }) => {
+const runJobLinkWise = async({ data, id, customHeaders }) => {
     try {
-        console.log({ url, id, customHeaders })
-
         firebase_utils.updateLink(id,{"status":"Started"})
 
         // 1. Get the file info using your utility function
-        const fileInfo = await getFileInfo(url,customHeaders);
+        const fileInfo = await getFileInfo(data.url,customHeaders);
         if (!fileInfo) throw new Error("Could not retrieve file information.");
 
-        const fileName = Date().toString() + " --- URL_FILE"
+        const fileName = data?.filename | Date().toString() + " --- URL_FILE"
         firebase_utils.updateLink(id,{"status":"Starting download"})
 
         // 3. Initiate the actual file download
-        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
+        const fetchResponse = await fetch(data.url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
         
         if (!fetchResponse.ok) {
             throw new Error(`Failed to download file: ${fetchResponse.status}`);
@@ -182,4 +180,5 @@ const run_job = async () => {
     }
 }
 
-run_job()
+// run_job()
+firebase_utils.addLink()
