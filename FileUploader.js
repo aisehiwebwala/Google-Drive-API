@@ -164,11 +164,13 @@ const runJobLinkWise = async({ data, id, customHeaders }) => {
                 body: nodeStream,
             },
             fields: 'id, name, webViewLink',
+            supportsAllDrives: true
         });
 
         firebase_utils.updateLink(id,{"status":"Upload Complete","completed":true})
 
     } catch (error) {
+        console.error(error)
         firebase_utils.updateLink(id, { "completed": false, "status": error.message })
     }
 }
