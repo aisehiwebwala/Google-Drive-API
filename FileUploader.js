@@ -180,5 +180,5 @@ const run_job = async () => {
     }
 }
 
-// run_job()
-firebase_utils.addLink()
+run_job()
+// firebase_utils.addLink()
