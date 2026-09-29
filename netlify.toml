@@ -1,0 +1,39 @@
+[build]
+  # public/ is the CDN-served asset root (style.css, app.js). views/index.html is
+  # deliberately NOT in here - it is a template with {{...}} placeholders that the
+  # function stamps per request, so it must never be served as a static file.
+  publish = "public"
+  functions = "netlify/functions"
+  # No bundler step - the app is plain CommonJS and the browser assets are static.
+  command = "echo 'no build step'"
+
+[build.environment]
+  NODE_VERSION = "22"
+  # Turns on the production cookie flag (`secure: true`) in server.js.
+  NODE_ENV = "production"
+
+[functions]
+  node_bundler = "esbuild"
+  # The template is read at request time with fs.readFile(), so no bundler can
+  # infer the dependency by static analysis - it has to be named explicitly.
+  included_files = ["views/**"]
+  # firebase-admin resolves gRPC/protobuf assets through dynamic requires that
+  # esbuild cannot follow, so it ships as a plain node_modules dependency instead
+  # of being bundled. Same for the googleapis pair, which the job script pulls in.
+  external_node_modules = ["firebase-admin", "googleapis", "google-auth-library"]
+
+# Everything that is not a real file in public/ goes to the Express app. Netlify
+# checks the publish directory first and only falls through to this rule on a
+# miss, which is why `force` stays off: /style.css keeps hitting the CDN, while
+# / and /api/* reach the function.
+[[redirects]]
+  from = "/*"
+  to = "/.netlify/functions/server"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "same-origin"

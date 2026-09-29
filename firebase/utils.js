@@ -1,6 +1,18 @@
 const db = require("./config")
 
+if (!process.env.URL_COLLECTION_NAME) {
+    throw new Error("URL_COLLECTION_NAME is not set")
+}
+
 const urls_collection = db.collection(process.env.URL_COLLECTION_NAME)
+
+// createdAt/updatedAt are stored as Date().toString() strings rather than
+// Firestore Timestamps, so they cannot be ordered in the query itself.
+const byNewestFirst = (a, b) => {
+    const left = Date.parse(a.createdAt) || 0
+    const right = Date.parse(b.createdAt) || 0
+    return right - left
+}
 
 const listAll = async () => {
     try {
@@ -42,20 +54,30 @@ const listPending = async () => {
     }
 }
 
-const addLink = async () => {
+// Returns every link, newest first, for the console's status table.
+const listLinks = async () => {
+    const allDocs = await listAll()
+    return allDocs.sort(byNewestFirst)
+}
+
+const addLink = async ({ url, filename = "", customHeaders = {} } = {}) => {
     try {
+        if (!url) throw new Error("url is required")
+
+        const now = new Date().toString()
         const json_data = {
             "data": {
-                "url": "https://www.w3schools.com/Html/mov_bbb.mp4",
-                "filename": "",
+                "url": url,
+                "filename": filename,
             },
             "completed": false,
             "status": "Not Started",
-            "createdAt": new Date().toString(),
-            "updatedAt": new Date().toString(),
-            "customHeaders": {}
+            "createdAt": now,
+            "updatedAt": now,
+            "customHeaders": customHeaders
         }
-        await urls_collection.add(json_data)
+        const docRef = await urls_collection.add(json_data)
+        return { id: docRef.id, ...json_data }
     } catch (error) {
         console.error('Error adding document: ', error);
         throw error
@@ -121,5 +143,5 @@ const deleteAllCompleted = async () => {
     }
 }
 
-module.exports = { listAll, addLink, listPending, updateLink, deleteByID, deleteAllCompleted }
+module.exports = { listAll, listLinks, addLink, listPending, updateLink, deleteByID, deleteAllCompleted }
 

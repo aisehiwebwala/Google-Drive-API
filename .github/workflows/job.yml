@@ -4,10 +4,19 @@ on:
   push:
     branches:
       - main
+  # Lets the console (and the Actions tab) start a run on demand.
+  workflow_dispatch:
+
+# Two runs must never drain the same pending links at once, so a second
+# dispatch waits for the first to finish instead of racing it.
+concurrency:
+  group: drive-uploader
+  cancel-in-progress: false
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4

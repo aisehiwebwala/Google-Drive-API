@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Drive Uploader Console</title>
+    <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+
+<!-- Which screen starts visible is stamped in by the server from the session
+     cookie, so the first paint is already correct. app.js can still swap
+     between them afterwards (login, logout, session expiry mid-session). -->
+<main id="login-screen" class="screen centered"{{LOGIN_HIDDEN}}>
+    <form id="login-form" class="card login-card">
+        <h1>Drive Uploader</h1>
+        <p class="muted">Enter your access key to continue.</p>
+        <input id="key-input" type="password" placeholder="Access key" autocomplete="current-password" required>
+        <button type="submit" class="primary">Unlock</button>
+        <p id="login-error" class="error" role="alert" hidden></p>
+    </form>
+</main>
+
+<!-- Console screen -->
+<div id="app-screen" class="screen"{{APP_HIDDEN}}>
+    <header class="topbar">
+        <h1>Drive Uploader</h1>
+        <div class="topbar-right">
+            <span id="session-timer" class="muted" title="Time left on this session"></span>
+            <button id="logout-btn" class="ghost">Sign out</button>
+        </div>
+    </header>
+
+    <main class="layout">
+        <section class="card">
+            <h2>Queue a link</h2>
+            <form id="link-form">
+                <label for="url-input">File URL <span class="req">*</span></label>
+                <input id="url-input" type="url" placeholder="https://example.com/video.mp4" required>
+
+                <label for="filename-input">Filename <span class="muted">(optional)</span></label>
+                <input id="filename-input" type="text" placeholder="Leave blank to auto-generate">
+
+                <label for="headers-input">Custom headers <span class="muted">(optional, one per line)</span></label>
+                <textarea id="headers-input" rows="4" placeholder="Referer: https://example.com&#10;Cookie: session=abc123"></textarea>
+
+                <button type="submit" class="primary">Add to queue</button>
+                <p id="link-message" class="message" role="status" hidden></p>
+            </form>
+        </section>
+
+        <section class="card">
+            <h2>Run the job</h2>
+            <p class="muted">
+                Dispatches the GitHub Actions workflow, which downloads every pending
+                link and streams it to Drive.
+            </p>
+            <p id="pending-summary" class="summary">&nbsp;</p>
+            <button id="run-btn" class="primary">Run pending links</button>
+            <p id="run-message" class="message" role="status" hidden></p>
+        </section>
+    </main>
+
+    <section class="card wide">
+        <div class="card-head">
+            <h2>Links</h2>
+            <div class="card-head-actions">
+                <span id="refresh-note" class="muted"></span>
+                <button id="refresh-btn" class="ghost">Refresh</button>
+                <button id="clear-btn" class="ghost danger">Clear completed</button>
+            </div>
+        </div>
+        <div class="table-wrap">
+            <table id="links-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>URL</th>
+                        <th>Filename</th>
+                        <th>Updated</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody id="links-body"></tbody>
+            </table>
+        </div>
+        <p id="links-empty" class="muted empty" hidden>Nothing queued yet.</p>
+    </section>
+</div>
+
+<script>window.__SESSION__ = {{SESSION}};</script>
+<script src="./app.js"></script>
+</body>
+</html>
