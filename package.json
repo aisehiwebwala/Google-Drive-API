@@ -20,7 +20,6 @@
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
     "firebase-admin": "^14.5.0",
-    "google-auth-library": "^11.1.0",
     "googleapis": "^182.0.0",
     "jsonwebtoken": "^9.0.3",
     "serverless-http": "^4.0.0"
