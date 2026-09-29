@@ -17,10 +17,6 @@
   # The template is read at request time with fs.readFile(), so no bundler can
   # infer the dependency by static analysis - it has to be named explicitly.
   included_files = ["views/**"]
-  # firebase-admin resolves gRPC/protobuf assets through dynamic requires that
-  # esbuild cannot follow, so it ships as a plain node_modules dependency instead
-  # of being bundled. Same for the googleapis pair, which the job script pulls in.
-  external_node_modules = ["firebase-admin", "googleapis", "google-auth-library"]
 
 # Everything that is not a real file in public/ goes to the Express app. Netlify
 # checks the publish directory first and only falls through to this rule on a
