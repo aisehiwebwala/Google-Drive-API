@@ -33,8 +33,8 @@ async function getFileInfo(_url, customHeaders) {
 }
 
 /**
- * Intercepts the download stream. If it's a ZIP/GZIP, it safely sets up 
- * an internal transform pipe and extracts the inner files on the fly.
+ * Intercepts the stream before passing it to Google Drive.
+ * Uses 'for await' loops to block drive initialization until the uncompressed data layers resolve.
  */
 async function processStreamPipeline(inputStream, initialFileName, contentType) {
     const lowerName = initialFileName.toLowerCase();
@@ -42,7 +42,7 @@ async function processStreamPipeline(inputStream, initialFileName, contentType) 
 
     // --- 1. HANDLE GZIP (.gz) ---
     if (lowerName.endsWith('.gz') || lowerMime === 'application/gzip' || lowerMime === 'application/x-gzip') {
-        console.log("Detected GZIP file. Decompressing stream on-the-fly...");
+        console.log("Detected GZIP format. Generating decompression piping...");
         const gunzipStream = zlib.createGunzip();
         const decompressedStream = inputStream.pipe(gunzipStream);
         const cleanName = initialFileName.replace(/\.gz\$/i, '');
@@ -56,44 +56,34 @@ async function processStreamPipeline(inputStream, initialFileName, contentType) 
 
     // --- 2. HANDLE ZIP (.zip) ---
     if (lowerName.endsWith('.zip') || lowerMime === 'application/zip' || lowerMime === 'application/x-zip-compressed') {
-        console.log("Detected ZIP file. Setting up extraction parser pipeline...");
+        console.log("Detected ZIP format. Intercepting inner entries...");
         
-        const zipParseStream = inputStream.pipe(unzipper.Parse());
+        // Force the stream parser to yield chunk entities cleanly via standard node runtime iterators
+        const zipParser = inputStream.pipe(unzipper.Parse({ forceStream: true }));
         const targetPassThrough = new PassThrough();
 
-        // We wrap entry detection in a promise to prevent Google Drive from grabbing the root zip stream prematurely
-        const streamReady = new Promise((resolve, reject) => {
-            let fileFound = false;
+        // We run an async lookup loop to catch the first available file stream *before* returning to the drive execution code
+        for await (const entry of zipParser) {
+            if (entry.type === 'file') {
+                console.log(`Extracting file on-the-fly: ${entry.path}`);
+                
+                // Immediately pipe the entry bytes into the passthrough gate
+                entry.pipe(targetPassThrough);
 
-            zipParseStream.on('entry', (entry) => {
-                if (entry.type === 'file' && !fileFound) {
-                    fileFound = true;
-                    console.log(`Extracting file on-the-fly: ${entry.path}`);
-                    
-                    // Route the extracted payload directly out through our PassThrough gate
-                    entry.pipe(targetPassThrough);
-                    
-                    // Instantly resolve the metadata for Google Drive creation
-                    resolve({
-                        stream: targetPassThrough,
-                        name: entry.path,
-                        mimeType: 'application/octet-stream'
-                    });
-                } else {
-                    entry.autodrain(); // Keep moving without RAM overhead
-                }
-            });
-
-            zipParseStream.on('error', (err) => reject(err));
-            zipParseStream.on('end', () => {
-                if (!fileFound) reject(new Error("ZIP archive was empty or contained no extraction-friendly files."));
-            });
-        });
-
-        return await streamReady;
+                // Return this structure immediately. Google Drive will read from targetPassThrough
+                return {
+                    stream: targetPassThrough,
+                    name: entry.path,
+                    mimeType: 'application/octet-stream'
+                };
+            } else {
+                entry.autodrain(); // Skip folders/metadata instantly without memory allocation
+            }
+        }
+        throw new Error("ZIP file parsing completed but no extractable files were discovered.");
     }
 
-    // --- 3. UNCOMPRESSED PASSTHROUGH ---
+    // --- 3. STANDARD UNCOMPRESSED PASSTHROUGH ---
     return { 
         stream: inputStream, 
         name: initialFileName, 
@@ -107,18 +97,15 @@ async function uploadUrlToDrive(url, customHeaders) {
         if (!fileInfo) throw new Error("Could not retrieve file information.");
 
         let fileName = Date().toString() + " --- URL_FILE";
-        console.log(`Starting download stream for: ${fileName}`);
-
         const fetchResponse = await fetch(url, { headers: { "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
         if (!fetchResponse.ok) throw new Error(`Failed to download file: ${fetchResponse.status}`);
 
         const nodeStream = Readable.fromWeb(fetchResponse.body);
         
-        // Asynchronously intercept and restructure the stream pipeline if compressed
+        // This halts until the true extraction stream structure resolves
         const pipeline = await processStreamPipeline(nodeStream, fileName, fileInfo.contentType);
 
         console.log(`Streaming extracted asset [${pipeline.name}] directly to Google Drive...`);
-
         const driveResponse = await drive.files.create({
             requestBody: { name: pipeline.name, parents: [parentFolderId] },
             media: { mimeType: pipeline.mimeType, body: pipeline.stream },
@@ -181,7 +168,7 @@ const runJobLinkWise = async ({ data, id, customHeaders }) => {
 
         const nodeStream = Readable.fromWeb(fetchResponse.body);
         
-        // Wait for zip parser entry registration
+        // Await extraction setup processing
         const pipeline = await processStreamPipeline(nodeStream, fileName, fileInfo.contentType);
 
         firebase_utils.updateLink(id, { "status": `Uploading decompressed file: ${pipeline.name}` });
