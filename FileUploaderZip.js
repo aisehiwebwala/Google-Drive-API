@@ -1,8 +1,8 @@
 const { google } = require("googleapis");
-const { Readable } = require("stream");
+const { Readable, PassThrough } = require("stream");
 const { spawn } = require('child_process');
-const zlib = require('zlib'); // Built-in for .gz / deflate
-const unzipper = require('unzipper'); // For streaming .zip archives
+const zlib = require('zlib');
+const unzipper = require('unzipper');
 
 const dotenv = require("dotenv");
 dotenv.config();
@@ -13,10 +13,7 @@ const authClient = new google.auth.OAuth2({
     client_id: process.env.client_id,
     client_secret: process.env.client_secret
 });
-
-authClient.setCredentials({
-    refresh_token: process.env.refresh_token
-});
+authClient.setCredentials({ refresh_token: process.env.refresh_token });
 
 const drive = google.drive({ version: 'v3', auth: authClient });
 const parentFolderId = process.env.parentFolderId;
@@ -24,12 +21,7 @@ const parentFolderId = process.env.parentFolderId;
 async function getFileInfo(_url, customHeaders) {
     try {
         const response = await fetch(_url, { method: "HEAD", headers: { ...customHeaders } });
-        if (response.status === 426) {
-            const requiredProtocol = response.headers.get("upgrade");
-            console.error(`\n[BLOCKED] 426 Upgrade Required.`);
-            console.error(`The server is demanding: ${requiredProtocol}\n`);
-            return null;
-        }
+        if (response.status === 426) return null;
         return { 
             "contentType": response.headers.get("content-type"), 
             "contentLength": response.headers.get("content-length") 
@@ -41,21 +33,20 @@ async function getFileInfo(_url, customHeaders) {
 }
 
 /**
- * Checks content-type or filename to handle decompressions on-the-fly.
- * Returns { stream: Readable, name: string, mimeType: string }
+ * Intercepts the download stream. If it's a ZIP/GZIP, it safely sets up 
+ * an internal transform pipe and extracts the inner files on the fly.
  */
-function handleDecompressionPipeline(inputStream, initialFileName, contentType) {
+async function processStreamPipeline(inputStream, initialFileName, contentType) {
     const lowerName = initialFileName.toLowerCase();
     const lowerMime = (contentType || '').toLowerCase();
 
-    // 1. Handle GZIP (.gz)
+    // --- 1. HANDLE GZIP (.gz) ---
     if (lowerName.endsWith('.gz') || lowerMime === 'application/gzip' || lowerMime === 'application/x-gzip') {
-        console.log("Detected GZIP file. Decompressing on the fly...");
+        console.log("Detected GZIP file. Decompressing stream on-the-fly...");
         const gunzipStream = zlib.createGunzip();
         const decompressedStream = inputStream.pipe(gunzipStream);
+        const cleanName = initialFileName.replace(/\.gz\$/i, '');
         
-        // Strip out the .gz extension for Google Drive
-        const cleanName = initialFileName.replace(/\.gz$/i, '');
         return { 
             stream: decompressedStream, 
             name: cleanName, 
@@ -63,43 +54,51 @@ function handleDecompressionPipeline(inputStream, initialFileName, contentType) 
         };
     }
 
-    // 2. Handle ZIP (.zip)
+    // --- 2. HANDLE ZIP (.zip) ---
     if (lowerName.endsWith('.zip') || lowerMime === 'application/zip' || lowerMime === 'application/x-zip-compressed') {
-        console.log("Detected ZIP file. Extracting first file on the fly...");
+        console.log("Detected ZIP file. Setting up extraction parser pipeline...");
         
-        // Transform the stream into a zip parser
         const zipParseStream = inputStream.pipe(unzipper.Parse());
-        
-        // We create a PassThrough stream that Google Drive can read from instantly
-        const targetReadable = new zlib.PassThrough(); 
-        let fileDispatched = false;
+        const targetPassThrough = new PassThrough();
 
-        zipParseStream.on('entry', (entry) => {
-            // Take the first actual file found in the archive
-            if (entry.type === 'file' && !fileDispatched) {
-                fileDispatched = true;
-                console.log(`Extracting: ${entry.path}`);
-                
-                // Update or inherit the filename from inside the zip
-                targetReadable.filename = entry.path; 
-                entry.pipe(targetReadable);
-            } else {
-                entry.autodrain(); // Skip other files or directories safely without RAM leaks
-            }
+        // We wrap entry detection in a promise to prevent Google Drive from grabbing the root zip stream prematurely
+        const streamReady = new Promise((resolve, reject) => {
+            let fileFound = false;
+
+            zipParseStream.on('entry', (entry) => {
+                if (entry.type === 'file' && !fileFound) {
+                    fileFound = true;
+                    console.log(`Extracting file on-the-fly: ${entry.path}`);
+                    
+                    // Route the extracted payload directly out through our PassThrough gate
+                    entry.pipe(targetPassThrough);
+                    
+                    // Instantly resolve the metadata for Google Drive creation
+                    resolve({
+                        stream: targetPassThrough,
+                        name: entry.path,
+                        mimeType: 'application/octet-stream'
+                    });
+                } else {
+                    entry.autodrain(); // Keep moving without RAM overhead
+                }
+            });
+
+            zipParseStream.on('error', (err) => reject(err));
+            zipParseStream.on('end', () => {
+                if (!fileFound) reject(new Error("ZIP archive was empty or contained no extraction-friendly files."));
+            });
         });
 
-        zipParseStream.on('error', (err) => targetReadable.emit('error', err));
-
-        return { 
-            stream: targetReadable, 
-            name: initialFileName, // Will fallback to this unless overridden down the line
-            mimeType: 'application/octet-stream',
-            isZip: true
-        };
+        return await streamReady;
     }
 
-    // 3. Uncompressed file - Pass through untouched
-    return { stream: inputStream, name: initialFileName, mimeType: contentType || 'application/octet-stream' };
+    // --- 3. UNCOMPRESSED PASSTHROUGH ---
+    return { 
+        stream: inputStream, 
+        name: initialFileName, 
+        mimeType: contentType || 'application/octet-stream' 
+    };
 }
 
 async function uploadUrlToDrive(url, customHeaders) {
@@ -108,50 +107,26 @@ async function uploadUrlToDrive(url, customHeaders) {
         if (!fileInfo) throw new Error("Could not retrieve file information.");
 
         let fileName = Date().toString() + " --- URL_FILE";
-        console.log(`Starting download for: ${fileName} (${fileInfo.contentType})`);
+        console.log(`Starting download stream for: ${fileName}`);
 
         const fetchResponse = await fetch(url, { headers: { "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
-        if (fetchResponse.status === 426) {
-            throw new Error("426 Upgrade Required");
-        }
-        if (!fetchResponse.ok) {
-            throw new Error(`Failed to download file: ${fetchResponse.status}`);
-        }
+        if (!fetchResponse.ok) throw new Error(`Failed to download file: ${fetchResponse.status}`);
 
         const nodeStream = Readable.fromWeb(fetchResponse.body);
         
-        // Process pipeline for decompression
-        let pipeline = handleDecompressionPipeline(nodeStream, fileName, fileInfo.contentType);
+        // Asynchronously intercept and restructure the stream pipeline if compressed
+        const pipeline = await processStreamPipeline(nodeStream, fileName, fileInfo.contentType);
 
-        // If it was a zip file, wait briefly for the 'entry' event to parse the filename inside the zip
-        if (pipeline.isZip) {
-            await new Promise((resolve) => {
-                pipeline.stream.once('data', () => {
-                    if (pipeline.stream.filename) pipeline.name = pipeline.stream.filename;
-                    resolve();
-                });
-                // Safety timeout if zip is empty or invalid
-                setTimeout(resolve, 1500);
-            });
-        }
-
-        console.log(`Streaming ${pipeline.name} directly to Google Drive...`);
+        console.log(`Streaming extracted asset [${pipeline.name}] directly to Google Drive...`);
 
         const driveResponse = await drive.files.create({
-            requestBody: {
-                name: pipeline.name,
-                parents: [parentFolderId]
-            },
-            media: {
-                mimeType: pipeline.mimeType,
-                body: pipeline.stream,
-            },
+            requestBody: { name: pipeline.name, parents: [parentFolderId] },
+            media: { mimeType: pipeline.mimeType, body: pipeline.stream },
             fields: 'id, name, webViewLink',
         });
 
         console.log(`Upload complete! Drive Link: ${driveResponse.data.webViewLink}`);
         return driveResponse.data;
-
     } catch (error) {
         console.error('Error in upload process:', error.message);
         throw error;
@@ -163,8 +138,7 @@ async function uploadUrlToDriveDirect(url) {
         const fileInfo = await getFileInfo(url);
         let fileName = Date().toString() + " --- URL_FILE";
 
-        console.log(`Starting direct HTTP/2 stream for: ${fileName}`);
-
+        console.log(`Starting direct HTTP/2 stream via curl for: ${fileName}`);
         const curl = spawn('curl', [
             '-s', '-L', '--http2',
             '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
@@ -175,36 +149,17 @@ async function uploadUrlToDriveDirect(url) {
             if (code !== 0) console.error(`curl exited with code ${code}`);
         });
 
-        // Process pipeline for decompression from curl stdout
-        let pipeline = handleDecompressionPipeline(curl.stdout, fileName, fileInfo ? fileInfo.contentType : '');
+        const pipeline = await processStreamPipeline(curl.stdout, fileName, fileInfo ? fileInfo.contentType : '');
 
-        if (pipeline.isZip) {
-            await new Promise((resolve) => {
-                pipeline.stream.once('data', () => {
-                    if (pipeline.stream.filename) pipeline.name = pipeline.stream.filename;
-                    resolve();
-                });
-                setTimeout(resolve, 1500);
-            });
-        }
-
-        console.log(`Piping directly to Google Drive...`);
-
+        console.log(`Piping extracted asset [${pipeline.name}] directly to Google Drive...`);
         const driveResponse = await drive.files.create({
-            requestBody: {
-                name: pipeline.name,
-                parents: [parentFolderId]
-            },
-            media: {
-                mimeType: pipeline.mimeType,
-                body: pipeline.stream,
-            },
+            requestBody: { name: pipeline.name, parents: [parentFolderId] },
+            media: { mimeType: pipeline.mimeType, body: pipeline.stream },
             fields: 'id, name, webViewLink',
         });
 
         console.log(`Upload complete! Drive Link: ${driveResponse.data.webViewLink}`);
         return driveResponse.data;
-
     } catch (error) {
         console.error('Error in upload process:', error.message);
         throw error;
@@ -222,42 +177,23 @@ const runJobLinkWise = async ({ data, id, customHeaders }) => {
         firebase_utils.updateLink(id, { "status": "Starting download" });
 
         const fetchResponse = await fetch(data.url, { headers: { "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
-        if (!fetchResponse.ok) {
-            throw new Error(`Failed to download file: ${fetchResponse.status}`);
-        }
+        if (!fetchResponse.ok) throw new Error(`Failed to download file: ${fetchResponse.status}`);
 
         const nodeStream = Readable.fromWeb(fetchResponse.body);
         
-        // Process pipeline for decompression
-        let pipeline = handleDecompressionPipeline(nodeStream, fileName, fileInfo.contentType);
+        // Wait for zip parser entry registration
+        const pipeline = await processStreamPipeline(nodeStream, fileName, fileInfo.contentType);
 
-        if (pipeline.isZip) {
-            await new Promise((resolve) => {
-                pipeline.stream.once('data', () => {
-                    if (pipeline.stream.filename) pipeline.name = pipeline.stream.filename;
-                    resolve();
-                });
-                setTimeout(resolve, 1500);
-            });
-        }
-
-        firebase_utils.updateLink(id, { "status": "Uploading to Drive..." });
+        firebase_utils.updateLink(id, { "status": `Uploading decompressed file: ${pipeline.name}` });
 
         const driveResponse = await drive.files.create({
-            requestBody: {
-                name: pipeline.name,
-                parents: [parentFolderId]
-            },
-            media: {
-                mimeType: pipeline.mimeType,
-                body: pipeline.stream,
-            },
+            requestBody: { name: pipeline.name, parents: [parentFolderId] },
+            media: { mimeType: pipeline.mimeType, body: pipeline.stream },
             fields: 'id, name, webViewLink',
             supportsAllDrives: true
         });
 
         firebase_utils.updateLink(id, { "status": "Upload Complete", "completed": true });
-
     } catch (error) {
         console.error(error);
         firebase_utils.updateLink(id, { "completed": false, "status": error.message });
