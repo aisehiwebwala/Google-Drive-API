@@ -39,4 +39,4 @@ jobs:
           FIREBASE_PROJECT_ID: ${{secrets.FIREBASE_PROJECT_ID}}
           FIREBASE_PRIVATE_KEY: ${{secrets.FIREBASE_PRIVATE_KEY}}
           URL_COLLECTION_NAME: ${{secrets.URL_COLLECTION_NAME}}
-        run: node FileUploader.js
+        run: node FileUploaderZip.js

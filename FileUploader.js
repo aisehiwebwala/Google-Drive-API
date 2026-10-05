@@ -21,7 +21,7 @@ const parentFolderId = process.env.parentFolderId
 
 async function getFileInfo(_url, customHeaders) {
     try {
-        const response = await fetch(_url, { method: "HEAD", headers: { "Referer": "https://mzfi.me", ...customHeaders } })
+        const response = await fetch(_url, { method: "HEAD", headers: { ...customHeaders } })
         if (response.status === 426) {
             const requiredProtocol = response.headers.get("upgrade");
             console.error(`\n[BLOCKED] 426 Upgrade Required.`);
@@ -44,7 +44,7 @@ async function uploadUrlToDrive(url, customHeaders) {
         console.log(`Starting download for: ${fileName} (${fileInfo.contentType})`);
 
         // 3. Initiate the actual file download
-        const fetchResponse = await fetch(url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
+        const fetchResponse = await fetch(url, { headers: { "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
         if (response.status === 426) {
             const requiredProtocol = response.headers.get("upgrade");
             console.error(`\n[BLOCKED] 426 Upgrade Required.`);
@@ -97,7 +97,6 @@ async function uploadUrlToDriveDirect(url) {
             '-s',       // Silent mode
             '-L',       // Follow redirects
             '--http2',  // Explicitly use HTTP/2 to avoid 426 errors
-            '-H', 'Referer: https://mzfi.me',
             '-H', 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
             url
         ]);
@@ -143,7 +142,7 @@ const runJobLinkWise = async({ data, id, customHeaders }) => {
         firebase_utils.updateLink(id,{"status":"Starting download"})
 
         // 3. Initiate the actual file download
-        const fetchResponse = await fetch(data.url, { headers: { "Referer": "https://mzfi.me", "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
+        const fetchResponse = await fetch(data.url, { headers: { "User-Agent": "PostmanRuntime/7.51.1", ...customHeaders } });
         
         if (!fetchResponse.ok) {
             throw new Error(`Failed to download file: ${fetchResponse.status}`);
